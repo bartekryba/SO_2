@@ -54,7 +54,7 @@ parse_lowercase:
     cmp     al, 'f'
     ja      parse_other
 
-    sub     al, 55
+    sub     al, 87                  ; sub 87 to get 10 from a, 11 from b etc.
 
 after_num_load:
     test    r13b, r13b              ; check if program is in reading mode
@@ -236,7 +236,6 @@ _W_wait_for_second:                         ; wait for desired notec to connect
 
     mov     qword [r13 + r14*8], 0          ; update wait_table values to 0
     mov     qword [r13 + r9*8], 0
-    mov     qword [rdx], 0                  ; unlock spin_lock
 
     xor     r13, r13
     jmp     main_loop
