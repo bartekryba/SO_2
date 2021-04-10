@@ -232,7 +232,7 @@ _W_wait_for_second:                         ; wait for desired notec to connect
     mov     [r8], r11                       ; set desired notec's stack value to stack value of current notec
     mov     [rsp], rcx
 
-    ;push    rcx                            ; push desired notec's stack value onto current stack
+    mov     qword [rdx], 0                  ; free lock after passed critical section
 
     mov     qword [r13 + r14*8], 0          ; update wait_table values to 0
     mov     qword [r13 + r9*8], 0
@@ -241,7 +241,7 @@ _W_wait_for_second:                         ; wait for desired notec to connect
     jmp     main_loop
 
 _W_second:
-    mov     qword [rdx], 0                  ; free lock
+    ; don't free lock here, pass critical section to first thread
     mov     [rel stack_addr], rsp           ; save current thread's stack position in stack_addr
     mov     r11, r9
     inc     r11
