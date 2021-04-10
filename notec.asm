@@ -1,7 +1,7 @@
 section .bss
+wait_table  resq N
 spin_lock   resq 1
 stack_addr  resq 1
-wait_table  resd N
 
 section .text
 global notec
@@ -28,6 +28,9 @@ main_loop:
     mov     al, byte [r15 + r12]    ; load current byte from calc
     inc     r12                     ; advance iterator to next byte
 
+    test    al, al
+    jz      exit
+
     cmp     al, 'A'                 ; check if given byte is between A and F
     jb      parse_digit
     cmp     al, 'F'
@@ -37,9 +40,6 @@ main_loop:
     jmp     after_num_load
 
 parse_digit:
-    cmp     al, 0
-    je      exit
-
     cmp     al, '0'                 ; check is given byte between 0 and 9
     jb      parse_other
     cmp     al, '9'
@@ -80,6 +80,8 @@ parse_other:
     je      _n
     cmp     al, 'N'
     je      _N
+    cmp     al, 'g'
+    je      _g
 
     ; 1 arg operations:
     pop     r9
@@ -126,7 +128,7 @@ _g:
     mov     rdi, r14                        ; first arg - notec number
     mov     r13, rsp                        ; I know im not in reading mode, so i can use r13 register
     mov     rsi, rsp                        ; second arg - stack pointer
-    ;;;;;;;;;;;;; align stosu
+    and     rsp, -16
     call    debug
     mov     rsp, r13
     xor     r13, r13                        ; reset reading mode to 0
@@ -194,63 +196,64 @@ _Y:
 _X:
     push    r9
     push    r10
+    jmp     main_loop
 
 _W:
     mov     eax, 1                          ; value to lock spin_lock
-    mov     rdx, spin_lock                  ; load address of spin_lock to rdx
+    lea     rdx, [rel spin_lock]            ; load address of spin_lock to rdx
+    lea     r13, [rel wait_table]           ; store address of wait_table in r13
+
 _W_busy_wait:
-    xchg    [rdx], eax                      ; swap content of spin_lock and eax
+    xchg    [rdx], rax                      ; swap content of spin_lock and eax
     test    eax, eax                        ; check if lock was opened
     jnz     _W_busy_wait                    ; if not, return to waiting
 
-    mov     r11d, dword [wait_table + r9]   ; load wait_table value for desired notec
-    sub     r11d, 1
-    cmp     r11d, r14d
-    je      _W_connected                    ; if its equal to current notec, jump to _W_connected
+    mov     r11, [r13 + r9*8]               ; load wait_table value of desired notec
+    sub     r11, 1
+    cmp     r11, r14
+    je      _W_second                       ; if its equal to current notec, jump to _W_connected
 
-    mov     [wait_table + r14d], dword r9d  ; if not, set wait_table value for current notec to desired notec value
+    mov     r11, r9
+    add     r11, 1
+    mov     [r13 + r14*8], r11              ; if not, set wait_table value for current notec to desired notec value
     mov     qword [rdx], 0                  ; unlock spin_lock
 
 _W_wait_for_second:                         ; wait for desired notec to connect
-    mov     eax, 1                          ; same locking mechanism
-    xchg    [rdx], eax
-    test    eax, eax
-    jnz     _W_wait_for_second
-
-    mov     r11d, dword [wait_table + r9]   ; load wait_table value for desired notec
-    sub     r11d, 1
-    cmp     r11d, r14d                      ; wait until desired notec sets its wait_table
+    mov     r11, qword [r13 + r9*8]           ; load wait_table value for desired notec
+    sub     r11, 1
+    cmp     r11, r14                        ; wait until desired notec sets its wait_table
     jne     _W_wait_for_second              ; value to r9d
 
                                             ; after desired notec updated its wait_table value 
                                             ; it means that it has also loaded its rsp into stack_addr    
-    mov     r8, [stack_addr]                ; load it into r8
+    mov     r8, [rel stack_addr]            ; load it into r8
     mov     rcx, [r8]                       ; load desired notec's stack value into rcx
-    mov     [r8], r9                        ; set desired notec's stack value to stack value of current notec
-    push    rcx                             ; push desired notec's stack value onto current stack
+    mov     r11, [rsp]
+    mov     [r8], r11                       ; set desired notec's stack value to stack value of current notec
+    mov     [rsp], rcx
 
-    mov     [wait_table + r14d], dword 0    ; update wait_table values to 0
-    mov     [wait_table + r9], dword 0
+    ;push    rcx                            ; push desired notec's stack value onto current stack
+
+    mov     qword [r13 + r14*8], 0          ; update wait_table values to 0
+    mov     qword [r13 + r9*8], 0
     mov     qword [rdx], 0                  ; unlock spin_lock
 
+    xor     r13, r13
     jmp     main_loop
 
-_W_connected:
-    mov     [stack_addr], rsp               ; save current thread's stack position in stack_addr
-    mov     r11d, r9d
-    inc     r11d
-    mov     [wait_table + r14d], dword r11d ; save desired notec number for position of current notec in wait_table
+_W_second:
     mov     qword [rdx], 0                  ; free lock
+    mov     [rel stack_addr], rsp           ; save current thread's stack position in stack_addr
+    mov     r11, r9
+    inc     r11
+    mov     [r13 + r14*8], r11              ; save desired notec number for position of current notec in wait_table
 
-_W_wait_after_connected:
-    mov     eax, 1                          ; wait for own value in wait_table to be set to 0
-    xchg    [rdx], eax
-    test    eax, eax
-    jnz     _W_wait_after_connected
-    mov     r11d, dword [wait_table + r14d]
-    test    r11d, r11d
-    jnz     _W_wait_after_connected
+_W_second_wait:
+    mov     r11, qword [r13 + r14*8]
+    test    r11, r11
+    jnz     _W_second_wait
 
+    xor     r13, r13
     jmp     main_loop
 
 exit:
